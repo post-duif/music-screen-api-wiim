@@ -43,3 +43,29 @@ wiim_albumart_url = '/albumart?artist={artist}&track={track}'
 ```
 
 Then run `python3 go_sonos_highres.py` — the app will use the mocks and display the test image.
+
+Wiim-only mode
+----------------
+
+To run the project as a Wiim-only display (no Sonos API required):
+
+1. Configure `sonos_settings.py` (copy `sonos_settings.py.example` -> `sonos_settings.py`):
+
+```py
+wiim_only = True
+wiim_base_url = 'http://localhost:49152'
+```
+
+2. Run the mock Wiim server (or point to your real device):
+
+```bash
+python3 tests/mock_wiim_server.py --port 49152
+```
+
+3. Start the Wiim-only app:
+
+```bash
+python3 go_wiim.py
+```
+
+The app will poll the Wiim device and update the display when tracks change.
