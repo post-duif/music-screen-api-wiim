@@ -63,3 +63,13 @@ sleep_on_linein = False
 
 # Set to True if running on a Pi Zero along with `node-sonos-http-api` to mitigate long startup times and other performance limitations.
 pi_zero = False
+
+# Wiim Pro Plus / generic device album art support (optional)
+# Set wiim_enabled = True and provide either wiim_base_url or a full wiim_albumart_url template.
+# Examples:
+# wiim_base_url = "http://192.168.1.100:49152"
+# wiim_albumart_url = "/albumart?artist={artist}&track={track}"
+# Or set wiim_albumart_url to a full URL containing templates: "http://host/album?artist={artist}&track={track}"
+wiim_enabled = True
+wiim_base_url = ""
+wiim_albumart_url = ""

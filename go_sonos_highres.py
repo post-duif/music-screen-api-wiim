@@ -19,6 +19,8 @@ import async_demaster
 from display_controller import DisplayController, SonosDisplaySetupError
 from sonos_user_data import SonosData
 from webhook_handler import SonosWebhook
+from wiim_upnp import get_image_data as get_wiim_image_data
+from wiim_upnp import warmup as wiim_warmup
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -189,7 +191,16 @@ async def redraw(session, sonos_data, display):
             if show_spotify_albumart and spotify_auth_success and spotify_albumart_uri != None:
                 image_data = await get_image_data(session, spotify_albumart_uri)
             else:
-                image_data = await get_image_data(session, sonos_data.image_uri)
+                # Prefer Wiim album art if configured
+                image_data = None
+                try:
+                    if getattr(sonos_settings, "wiim_enabled", False):
+                        image_data = await get_wiim_image_data(session, sonos_data.artist, sonos_data.trackname)
+                except Exception:
+                    _LOGGER.debug("Wiim album art lookup failed, falling back to Sonos image")
+
+                if image_data is None:
+                    image_data = await get_image_data(session, sonos_data.image_uri)
             
             if image_data:
                 pil_image = Image.open(BytesIO(image_data))
@@ -277,6 +288,19 @@ async def main(loop):
     except SonosDisplaySetupError:
         loop.stop()
         return
+
+    # Start Wiim warmup in background to make per-track lookups snappy.
+    try:
+        if getattr(sonos_settings, "wiim_enabled", False):
+            # schedule warmup but don't block startup for long; await up to 2s
+            warmup_task = asyncio.ensure_future(wiim_warmup(session))
+            try:
+                await asyncio.wait_for(warmup_task, timeout=2)
+            except asyncio.TimeoutError:
+                # Let warmup continue in background
+                _LOGGER.debug("Wiim warmup is running in background")
+    except Exception:
+        _LOGGER.debug("Wiim warmup failed to start")
 
     if sonos_settings.room_name_for_highres == "":
         print("No room name found in sonos_settings.py")
