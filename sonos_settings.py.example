@@ -79,3 +79,19 @@ wiim_albumart_url = ""
 # wiim_only = True
 # wiim_base_url = 'http://<WIIM_IP>:<PORT>'
 wiim_only = False
+
+# Touch / touch-controls settings (HyperPixel with touch)
+# Enable touchscreen controls (True/False)
+touch_controls = False
+
+# When touch is enabled, tapping the screen can show details for this many seconds
+touch_detail_timeout = 8
+
+# Touch tap action options (comma-separated): any of 'show_details', 'next', 'favorite'
+# Example: touch_actions = ['show_details', 'next']
+touch_actions = ['show_details']
+
+# Favorite action backend: 'script' will execute the script at touch_favorite_script with args (artist,track,album)
+# 'tidal' would integrate with Tidal API (not implemented) and 'none' disables favorites.
+touch_favorite_backend = 'script'  # or 'tidal' or 'none'
+touch_favorite_script = '/path/to/favorite_script.sh'

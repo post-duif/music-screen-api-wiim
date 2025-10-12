@@ -81,3 +81,19 @@ async def get_now_playing(session, base_url) -> dict:
         _LOGGER.debug('Error parsing WiiM response [%s]', err)
 
     return result
+
+
+async def next_track(session, base_url):
+    """Send a next-track command to the device. Returns True on success."""
+    if not base_url:
+        return False
+    base = _normalise_base(base_url)
+    if not base:
+        return False
+    url = urllib.parse.urljoin(base, '/httpapi.asp?command=next')
+    try:
+        async with session.get(url, timeout=5, ssl=False) as resp:
+            return resp.status == 200
+    except Exception as err:
+        _LOGGER.debug('Wiim next_track failed %s [%s]', url, err)
+    return False

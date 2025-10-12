@@ -24,7 +24,7 @@ class SonosDisplaySetupError(Exception):
 class DisplayController:  # pylint: disable=too-many-instance-attributes
     """Controller to handle the display hardware and GUI interface."""
 
-    def __init__(self, loop, show_details, show_artist_and_album, show_details_timeout, overlay_text, show_play_state, show_spotify_code):
+    def __init__(self, loop, show_details, show_artist_and_album, show_details_timeout, overlay_text, show_play_state, show_spotify_code, touch_controls=False, touch_callback=None, touch_detail_timeout=None):
         """Initialize the display controller."""
 
         self.SCREEN_W = 720
@@ -54,6 +54,9 @@ class DisplayController:  # pylint: disable=too-many-instance-attributes
         self.is_showing = False
 
         self.backlight = Backlight()
+        self.touch_controls = touch_controls
+        self.touch_callback = touch_callback
+        self.touch_detail_timeout = touch_detail_timeout or 8
 
         try:
             self.root = tk.Tk()
@@ -159,7 +162,26 @@ class DisplayController:  # pylint: disable=too-many-instance-attributes
         self.detail_frame.grid_propagate(False)
 
         self.root.attributes("-fullscreen", True)
+        # Bind touch/click if enabled
+        if self.touch_controls:
+            try:
+                self.root.bind('<Button-1>', self._on_touch)
+            except Exception:
+                _LOGGER.debug('Failed to bind touch event')
+
         self.root.update()
+
+    def _on_touch(self, event):
+        """Internal handler for touch/click events."""
+        _LOGGER.debug('Touch event at %s,%s', event.x, event.y)
+        # Trigger external callback if provided
+        try:
+            if self.touch_callback:
+                self.touch_callback()
+        except Exception as err:
+            _LOGGER.debug('Touch callback error: %s', err)
+        # Default behaviour: show details temporarily
+        self.show_album(show_details=True, detail_timeout=self.touch_detail_timeout)
 
     def show_album(self, show_details=None, detail_timeout=None):
         """Show album with optional detail display and timeout."""

@@ -17,6 +17,7 @@ from display_controller import DisplayController, SonosDisplaySetupError
 import sonos_settings
 import wiim_client
 import wiim_upnp
+from collections import deque
 
 _LOGGER = logging.getLogger(__name__)
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -48,9 +49,67 @@ async def fetch_image(session, url):
 
 async def main(loop):
     ImageFile.LOAD_TRUNCATED_IMAGES = True
+    # Touch configuration
+    touch_enabled = getattr(sonos_settings, 'touch_controls', False)
+    touch_detail_timeout = getattr(sonos_settings, 'touch_detail_timeout', None)
+
+    # Maintain latest track info for favorite action
+    latest_info = {}
+
+    # recent touch timestamps for multi-tap detection
+    touch_times = deque()
+    touch_window = getattr(sonos_settings, 'touch_tap_window', 0.6)
+
+    def touch_callback():
+        """Handle touch taps: single = show details, double = next, triple = favorite."""
+        now = time.time()
+        touch_times.append(now)
+        # drop old taps
+        while touch_times and now - touch_times[0] > touch_window:
+            touch_times.popleft()
+        cnt = len(touch_times)
+        _LOGGER.debug('Touch callback: %d taps in window', cnt)
+        if cnt >= 3:
+            _LOGGER.info('Touch action: favorite')
+            touch_times.clear()
+            # schedule favorite handler
+            loop.create_task(_run_favorite(latest_info))
+        elif cnt >= 2:
+            _LOGGER.info('Touch action: next track')
+            touch_times.clear()
+            loop.create_task(wiim_client.next_track(session, base))
+        else:
+            _LOGGER.debug('Touch action: show details')
+            display.show_album(show_details=True, detail_timeout=touch_detail_timeout or 8)
+
+    async def _run_favorite(info):
+        """Run configured favorite backend (script) with artist/title/album."""
+        if not info:
+            _LOGGER.debug('No track info available for favorite')
+            return
+        backend = getattr(sonos_settings, 'touch_favorite_backend', 'script')
+        if backend == 'script':
+            script = getattr(sonos_settings, 'touch_favorite_script', None)
+            if not script:
+                _LOGGER.debug('No favorite script configured')
+                return
+            args = [script, info.get('artist') or '', info.get('title') or '', info.get('album') or '']
+            try:
+                proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                out, err = await proc.communicate()
+                _LOGGER.debug('Favorite script finished: %s %s', out, err)
+            except Exception as err:
+                _LOGGER.debug('Favorite script failed: %s', err)
+        else:
+            _LOGGER.debug('Favorite backend %s not implemented', backend)
+
+    # Create aiohttp session early so touch handlers can use it immediately
+    session = ClientSession()
+
     try:
         display = DisplayController(loop, sonos_settings.show_details, sonos_settings.show_artist_and_album,
-                                    sonos_settings.show_details_timeout, sonos_settings.overlay_text, sonos_settings.show_play_state, False)
+                                    sonos_settings.show_details_timeout, sonos_settings.overlay_text, sonos_settings.show_play_state, False,
+                                    touch_controls=touch_enabled, touch_callback=touch_callback, touch_detail_timeout=touch_detail_timeout)
     except SonosDisplaySetupError:
         loop.stop()
         return
@@ -59,7 +118,6 @@ async def main(loop):
 
     base_cfg = getattr(sonos_settings, 'wiim_base_url', '')
 
-    session = ClientSession()
 
     # If base isn't configured, attempt discovery/warmup to find devices
     base = base_cfg
@@ -97,6 +155,13 @@ async def main(loop):
     try:
         while True:
             info = await wiim_client.get_now_playing(session, base)
+            # publish latest info for touch favorite handling
+            try:
+                latest_info.clear()
+                if isinstance(info, dict):
+                    latest_info.update(info)
+            except Exception:
+                pass
             _LOGGER.debug('Wiim now playing: %s', info)
             track_id = f"{info.get('artist') or ''} - {info.get('title') or ''}"
             if track_id != previous_track:
