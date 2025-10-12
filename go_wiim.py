@@ -128,6 +128,7 @@ async def main(loop):
 
     # Create aiohttp session early so touch handlers can use it immediately
     session = ClientSession()
+    ctx['session'] = session
 
     try:
         display = DisplayController(loop, sonos_settings.show_details, sonos_settings.show_artist_and_album,
@@ -140,10 +141,22 @@ async def main(loop):
     setup_logging_local()
 
     base_cfg = getattr(sonos_settings, 'wiim_base_url', '')
-
-
     # If base isn't configured, attempt discovery/warmup to find devices
+    # Normalize configured base and populate ctx immediately to avoid race with touch handlers
     base = base_cfg
+    if base:
+        try:
+            parsed = urllib.parse.urlparse(base if base.startswith('http') else f'http://{base}')
+            # If the user configured a full httpapi.asp URL, strip to scheme://host:port
+            if parsed.path and 'httpapi.asp' in parsed.path:
+                base = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}"
+            else:
+                # ensure scheme and no trailing slash
+                base = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}" if parsed.hostname else base
+        except Exception:
+            # leave base as provided
+            pass
+        ctx['base'] = base
     if not base:
         _LOGGER.info('No wiim_base_url configured — attempting auto-discovery')
         try:
@@ -152,6 +165,7 @@ async def main(loop):
             if bases:
                 base = bases[0]
                 _LOGGER.info('Auto-discovered Wiim device: %s', base)
+                ctx['base'] = base
             else:
                 # As a last attempt, try SSDP discover locations
                 locs = await wiim_upnp.discover_locations(loop=loop, timeout=2)
@@ -159,6 +173,7 @@ async def main(loop):
                     parsed = urllib.parse.urlparse(locs[0])
                     base = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}"
                     _LOGGER.info('Discovered location via SSDP: %s', base)
+                    ctx['base'] = base
         except Exception as err:
             _LOGGER.debug('Auto-discovery failed: %s', err)
 
