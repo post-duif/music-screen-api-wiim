@@ -100,7 +100,9 @@ async def cleanup(loop, session, display):
 
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
+    # Create and set an explicit event loop to avoid the "There is no current event loop" deprecation warning
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
         loop.create_task(main(loop))
         loop.run_forever()

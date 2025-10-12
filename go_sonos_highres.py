@@ -357,7 +357,9 @@ async def cleanup(loop, session, webhook, display):
     loop.stop()
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
+    # Create and set an explicit event loop to avoid the "There is no current event loop" deprecation warning
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
         # If Wiim-only mode is enabled, run the Wiim entrypoint instead of Sonos flow
         if getattr(sonos_settings, 'wiim_only', False):
