@@ -4,11 +4,19 @@ import os
 import tkinter as tk
 from tkinter import Y, font as tkFont
 
-from PIL import ImageTk
+from PIL import Image, ImageTk
 
 from hyperpixel_backlight import Backlight
 
 _LOGGER = logging.getLogger(__name__)
+
+# Choose a resampling filter compatible with different Pillow versions.
+# Pillow 9.1+ exposes Image.Resampling.LANCZOS, older versions expose Image.LANCZOS
+# and very old versions used Image.ANTIALIAS. Fall back to NEAREST if none found.
+try:
+    RESAMPLE_FILTER = Image.Resampling.LANCZOS
+except AttributeError:
+    RESAMPLE_FILTER = getattr(Image, 'LANCZOS', getattr(Image, 'ANTIALIAS', Image.NEAREST))
 
 class SonosDisplaySetupError(Exception):
     """Error connecting to Sonos display."""
@@ -193,7 +201,8 @@ class DisplayController:  # pylint: disable=too-many-instance-attributes
 
         def resize_image(image, length):
             """Resizes the image, assumes square image."""
-            image = image.resize((length, length), ImageTk.Image.ANTIALIAS)
+            # Use the compatibility RESAMPLE_FILTER selected above.
+            image = image.resize((length, length), resample=RESAMPLE_FILTER)
             return ImageTk.PhotoImage(image)
 
         if code_image != None:
