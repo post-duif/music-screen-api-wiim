@@ -16,6 +16,7 @@ from typing import List
 
 from aiohttp import ClientError
 import aiohttp
+import json
 
 import sonos_settings
 
@@ -83,6 +84,13 @@ async def warmup(session, timeout=2):
     responsive = []
     for b in bases:
         try:
+            # First, try to confirm the device exposes the WiiM HTTP API (getMetaInfo)
+            api_ok = await _test_httpapi(session, b, timeout=timeout)
+            if api_ok:
+                responsive.append(b)
+                continue
+
+            # If API check failed, still try common image paths as a fallback
             data = await _try_common_paths(session, b, '', '', timeout=timeout)
             if data:
                 responsive.append(b)
@@ -92,6 +100,56 @@ async def warmup(session, timeout=2):
     _CACHED_BASES = responsive
     _LOGGER.debug('Wiim warmup cached bases: %s', _CACHED_BASES)
     return _CACHED_BASES
+
+
+async def _test_httpapi(session, base: str, timeout=3) -> bool:
+    """Test whether the device at base exposes the /httpapi.asp HTTP API.
+
+    Tries /httpapi.asp?command=getMetaInfo and getPlayerStatus. If the
+    current scheme returns 404 or non-JSON, the function will try the
+    opposite scheme (http <-> https) before returning False.
+    """
+    async def try_one(b):
+        meta_url = urllib.parse.urljoin(b, '/httpapi.asp?command=getMetaInfo')
+        try:
+            async with session.get(meta_url, timeout=timeout, ssl=False) as resp:
+                text = await resp.text()
+                if resp.status == 200:
+                    try:
+                        json.loads(text)
+                        _LOGGER.debug('HTTP API test succeeded at %s', meta_url)
+                        return True
+                    except Exception:
+                        _LOGGER.debug('HTTP API test: JSON decode failed at %s', meta_url)
+                else:
+                    _LOGGER.debug('HTTP API test: status %s at %s', resp.status, meta_url)
+        except Exception as err:
+            _LOGGER.debug('HTTP API test request failed %s [%s]', meta_url, err)
+        return False
+
+    # Try the provided base first
+    try:
+        ok = await try_one(base)
+        if ok:
+            return True
+    except Exception:
+        pass
+
+    # If base uses http, try https; if https, try http
+    parsed = urllib.parse.urlparse(base)
+    alt_scheme = 'https' if parsed.scheme == 'http' else 'http'
+    alt_base = f"{alt_scheme}://{parsed.hostname}:{parsed.port or ('443' if alt_scheme=='https' else '80')}"
+    try:
+        ok = await try_one(alt_base)
+        if ok:
+            # cache the alt scheme for future use
+            if alt_base not in _CACHED_BASES:
+                _CACHED_BASES.append(alt_base)
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def _sync_ssdp_search(mx=2, st='ssdp:all', timeout=2) -> List[str]:
