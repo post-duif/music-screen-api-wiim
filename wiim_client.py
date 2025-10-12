@@ -11,6 +11,7 @@ import logging
 import urllib.parse
 
 from aiohttp import ClientError
+import json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,14 +22,20 @@ def _normalise_base(base: str) -> str:
     base = base.strip()
     if base.startswith('http://') or base.startswith('https://'):
         return base.rstrip('/')
-    # default to https (WiiM devices often use https)
-    return f'https://{base.rstrip("/")}'
+    # Default to http for local LAN devices (more likely to be plain http)
+    return f'http://{base.rstrip("/")}'
 
 
 async def _fetch_json(session, url, timeout=5, ignore_ssl=True):
     try:
         async with session.get(url, timeout=timeout, ssl=False if ignore_ssl else None) as resp:
-            return await resp.json()
+            text = await resp.text()
+            # Some devices return JSON with wrong content-type (text/html). Try to parse anyway.
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                _LOGGER.debug('Wiim JSON decode failed for %s (status=%s, len=%d)', url, resp.status, len(text) if text else 0)
+                return None
     except ClientError as err:
         _LOGGER.debug('Wiim JSON fetch failed %s [%s]', url, err)
     except Exception as err:

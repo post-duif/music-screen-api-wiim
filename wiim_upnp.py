@@ -15,6 +15,7 @@ import urllib.parse
 from typing import List
 
 from aiohttp import ClientError
+import aiohttp
 
 import sonos_settings
 
@@ -45,14 +46,37 @@ async def warmup(session, timeout=2):
     try:
         loop = asyncio.get_event_loop()
         locations = await loop.run_in_executor(None, _sync_ssdp_search, 2, 'ssdp:all', 2)
+        validated_hosts = []
         for loc in locations:
             try:
                 parsed = urllib.parse.urlparse(loc)
-                base_host = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}"
-                if base_host not in bases:
-                    bases.append(base_host)
+                # Normal base_host from LOCATION
+                base_candidate = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}"
             except Exception:
                 continue
+
+            # Try to validate the LOCATION by fetching the description or root document
+            try:
+                async with session.get(loc, timeout=3) as resp:
+                    text = await resp.text()
+                    # Look for manufacturer/device hints in the XML/HTML
+                    hint = None
+                    lowered = (text or '').lower()
+                    if 'linkplay' in lowered or 'wiim' in lowered or 'wii m' in lowered:
+                        hint = 'linkplay'
+                    if 'httpapi.asp' in lowered or 'getmetainfo' in lowered or 'getplayerstatus' in lowered:
+                        hint = hint or 'httpapi'
+                    if hint:
+                        validated_hosts.append(base_candidate)
+                        _LOGGER.debug('Validated SSDP location %s as Wiim candidate (hint=%s)', base_candidate, hint)
+            except Exception:
+                # ignore individual location fetch failures
+                continue
+
+        # Append validated hosts after any configured base
+        for h in validated_hosts:
+            if h not in bases:
+                bases.append(h)
     except Exception:
         _LOGGER.debug('SSDP discovery during warmup failed')
 
