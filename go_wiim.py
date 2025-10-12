@@ -53,8 +53,8 @@ async def main(loop):
     touch_enabled = getattr(sonos_settings, 'touch_controls', False)
     touch_detail_timeout = getattr(sonos_settings, 'touch_detail_timeout', None)
 
-    # Maintain context for touch handler (mutable so closure sees updates)
-    ctx = {'base': None, 'session': None, 'latest_info': {}}
+    # Maintain latest track info for favorite action
+    latest_info = {}
 
     # recent touch timestamps for multi-tap detection
     touch_times = deque()
@@ -73,34 +73,15 @@ async def main(loop):
             _LOGGER.info('Touch action: favorite')
             touch_times.clear()
             # schedule favorite handler
-            loop.create_task(_run_favorite(ctx['latest_info']))
+            loop.create_task(_run_favorite(latest_info))
         elif cnt >= 2:
             _LOGGER.info('Touch action: next track')
             touch_times.clear()
-            # schedule an async task that will await and log the result
-            async def _do_next():
-                if not ctx['base'] or not ctx['session']:
-                    _LOGGER.debug('No base or session for next_track')
-                    return
-                # Provide immediate UI feedback so the touch feels snappy
-                try:
-                    display.show_album(show_details=True, detail_timeout=1)
-                except Exception:
-                    _LOGGER.debug('Failed to show immediate UI feedback')
-
-                t0 = time.perf_counter()
-                # Use a short timeout for the responsive touch path; retry with a longer timeout if needed
-                ok, status, text = await wiim_client.send_command(ctx['session'], ctx['base'], 'setPlayerCmd:next', timeout=2)
-                took = time.perf_counter() - t0
-                _LOGGER.debug('next_track result ok=%s status=%s took=%.3fs len_text=%d', ok, status, took, len(text) if text else 0)
-                if not ok:
-                    _LOGGER.info('next_track failed or timed out (%.3fs); retrying once with longer timeout', took)
-                    t1 = time.perf_counter()
-                    ok2, status2, text2 = await wiim_client.send_command(ctx['session'], ctx['base'], 'setPlayerCmd:next', timeout=5)
-                    took2 = time.perf_counter() - t1
-                    _LOGGER.debug('next_track retry ok=%s status=%s took=%.3fs', ok2, status2, took2)
-
-            loop.create_task(_do_next())
+            # Fire-and-forget next track (restore earlier behavior)
+            try:
+                loop.create_task(wiim_client.next_track(session, base))
+            except Exception as err:
+                _LOGGER.debug('Failed to schedule next_track: %s', err)
         else:
             _LOGGER.debug('Touch action: show details')
             display.show_album(show_details=True, detail_timeout=touch_detail_timeout or 8)
@@ -128,7 +109,6 @@ async def main(loop):
 
     # Create aiohttp session early so touch handlers can use it immediately
     session = ClientSession()
-    ctx['session'] = session
 
     try:
         display = DisplayController(loop, sonos_settings.show_details, sonos_settings.show_artist_and_album,
@@ -156,7 +136,7 @@ async def main(loop):
         except Exception:
             # leave base as provided
             pass
-        ctx['base'] = base
+    # populated base (normalized) assigned to local variable `base`
     if not base:
         _LOGGER.info('No wiim_base_url configured — attempting auto-discovery')
         try:
@@ -165,7 +145,6 @@ async def main(loop):
             if bases:
                 base = bases[0]
                 _LOGGER.info('Auto-discovered Wiim device: %s', base)
-                ctx['base'] = base
             else:
                 # As a last attempt, try SSDP discover locations
                 locs = await wiim_upnp.discover_locations(loop=loop, timeout=2)
@@ -173,7 +152,6 @@ async def main(loop):
                     parsed = urllib.parse.urlparse(locs[0])
                     base = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}"
                     _LOGGER.info('Discovered location via SSDP: %s', base)
-                    ctx['base'] = base
         except Exception as err:
             _LOGGER.debug('Auto-discovery failed: %s', err)
 
@@ -195,9 +173,9 @@ async def main(loop):
             info = await wiim_client.get_now_playing(session, base)
             # publish latest info for touch favorite handling
             try:
-                ctx['latest_info'].clear()
+                latest_info.clear()
                 if isinstance(info, dict):
-                    ctx['latest_info'].update(info)
+                    latest_info.update(info)
             except Exception:
                 pass
             _LOGGER.debug('Wiim now playing: %s', info)
