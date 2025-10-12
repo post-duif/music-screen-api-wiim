@@ -85,9 +85,9 @@ async def warmup(session, timeout=2):
     for b in bases:
         try:
             # First, try to confirm the device exposes the WiiM HTTP API (getMetaInfo)
-            api_ok = await _test_httpapi(session, b, timeout=timeout)
-            if api_ok:
-                responsive.append(b)
+            api_ok_base = await _test_httpapi(session, b, timeout=timeout)
+            if api_ok_base:
+                responsive.append(api_ok_base)
                 continue
 
             # If API check failed, still try common image paths as a fallback
@@ -118,14 +118,14 @@ async def _test_httpapi(session, base: str, timeout=3) -> bool:
                     try:
                         json.loads(text)
                         _LOGGER.debug('HTTP API test succeeded at %s', meta_url)
-                        return True
+                        return b
                     except Exception:
                         _LOGGER.debug('HTTP API test: JSON decode failed at %s (len=%d)', meta_url, len(text or ''))
                 else:
                     _LOGGER.debug('HTTP API test: status %s at %s', resp.status, meta_url)
         except Exception as err:
             _LOGGER.debug('HTTP API test request failed %s [%s]', meta_url, err)
-        return False
+        return None
 
     # Try a set of candidate base variants: as-given, same host without explicit port, alternate scheme with and without port
     parsed = urllib.parse.urlparse(base)
@@ -163,14 +163,12 @@ async def _test_httpapi(session, base: str, timeout=3) -> bool:
         try:
             ok = await try_one(c)
             if ok:
-                # cache the working base for future lookups
-                if c not in _CACHED_BASES:
-                    _CACHED_BASES.append(c)
-                return True
+                # Return the working base variant
+                return ok
         except Exception:
             continue
 
-    return False
+    return None
 
 
 def _sync_ssdp_search(mx=2, st='ssdp:all', timeout=2) -> List[str]:
