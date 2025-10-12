@@ -47,10 +47,21 @@ class Backlight():
         if new_state is False and self.power:
             _LOGGER.debug("Going idle, turning backlight off")
         self.power = new_state
-        GPIO.output(BACKLIGHT_PIN, new_state)
+        try:
+            GPIO.output(BACKLIGHT_PIN, new_state)
+        except RuntimeError as err:
+            _LOGGER.error("GPIO.output failed: %s", err)
+            # Disable further attempts to touch GPIO to avoid repeated errors
+            self.active = False
 
     def cleanup(self):
         """Return the GPIO setup to initial state."""
         if self.active:
-            GPIO.output(BACKLIGHT_PIN, True)
-            GPIO.cleanup()
+            try:
+                GPIO.output(BACKLIGHT_PIN, True)
+            except RuntimeError as err:
+                _LOGGER.debug("GPIO cleanup output failed: %s", err)
+            try:
+                GPIO.cleanup()
+            except RuntimeError as err:
+                _LOGGER.debug("GPIO.cleanup failed: %s", err)
