@@ -77,11 +77,19 @@ async def main(loop):
         elif cnt >= 2:
             _LOGGER.info('Touch action: next track')
             touch_times.clear()
-            # Fire-and-forget next track (restore earlier behavior)
-            try:
-                loop.create_task(wiim_client.next_track(session, base))
-            except Exception as err:
-                _LOGGER.debug('Failed to schedule next_track: %s', err)
+            # schedule an async task that will await and log the result
+            async def _do_next():
+                if not base or not session:
+                    _LOGGER.debug('No base or session for next_track')
+                    return
+                ok, status, text = await wiim_client.next_track(session, base)
+                _LOGGER.debug('next_track result ok=%s status=%s len_text=%d', ok, status, len(text) if text else 0)
+                if not ok:
+                    _LOGGER.info('Retrying next_track once')
+                    ok2, status2, text2 = await wiim_client.next_track(session, base)
+                    _LOGGER.debug('next_track retry ok=%s status=%s', ok2, status2)
+
+            loop.create_task(_do_next())
         else:
             _LOGGER.debug('Touch action: show details')
             display.show_album(show_details=True, detail_timeout=touch_detail_timeout or 8)
@@ -121,22 +129,10 @@ async def main(loop):
     setup_logging_local()
 
     base_cfg = getattr(sonos_settings, 'wiim_base_url', '')
+
+
     # If base isn't configured, attempt discovery/warmup to find devices
-    # Normalize configured base and populate ctx immediately to avoid race with touch handlers
     base = base_cfg
-    if base:
-        try:
-            parsed = urllib.parse.urlparse(base if base.startswith('http') else f'http://{base}')
-            # If the user configured a full httpapi.asp URL, strip to scheme://host:port
-            if parsed.path and 'httpapi.asp' in parsed.path:
-                base = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}"
-            else:
-                # ensure scheme and no trailing slash
-                base = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}" if parsed.hostname else base
-        except Exception:
-            # leave base as provided
-            pass
-    # populated base (normalized) assigned to local variable `base`
     if not base:
         _LOGGER.info('No wiim_base_url configured — attempting auto-discovery')
         try:
