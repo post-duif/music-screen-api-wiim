@@ -90,10 +90,20 @@ async def next_track(session, base_url):
     base = _normalise_base(base_url)
     if not base:
         return False
-    url = urllib.parse.urljoin(base, '/httpapi.asp?command=next')
+    # Some WiiM devices expect the setPlayerCmd: style (e.g. setPlayerCmd:next)
+    return await send_command(session, base, 'setPlayerCmd:next')
+
+
+async def send_command(session, base, command, timeout=5):
+    """Send a generic command to /httpapi.asp and return (ok, status, text)."""
+    if not session or not base:
+        return False, None, 'no-session-or-base'
+    url = urllib.parse.urljoin(base, f'/httpapi.asp?command={command}')
     try:
-        async with session.get(url, timeout=5, ssl=False) as resp:
-            return resp.status == 200
+        async with session.get(url, timeout=timeout, ssl=False) as resp:
+            text = await resp.text()
+            ok = resp.status == 200
+            return ok, resp.status, text
     except Exception as err:
-        _LOGGER.debug('Wiim next_track failed %s [%s]', url, err)
-    return False
+        _LOGGER.debug('Wiim send_command failed %s [%s]', url, err)
+        return False, None, str(err)
