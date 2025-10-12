@@ -120,34 +120,55 @@ async def _test_httpapi(session, base: str, timeout=3) -> bool:
                         _LOGGER.debug('HTTP API test succeeded at %s', meta_url)
                         return True
                     except Exception:
-                        _LOGGER.debug('HTTP API test: JSON decode failed at %s', meta_url)
+                        _LOGGER.debug('HTTP API test: JSON decode failed at %s (len=%d)', meta_url, len(text or ''))
                 else:
                     _LOGGER.debug('HTTP API test: status %s at %s', resp.status, meta_url)
         except Exception as err:
             _LOGGER.debug('HTTP API test request failed %s [%s]', meta_url, err)
         return False
 
-    # Try the provided base first
+    # Try a set of candidate base variants: as-given, same host without explicit port, alternate scheme with and without port
+    parsed = urllib.parse.urlparse(base)
+    candidates = []
+
+    # as-given
+    candidates.append(base)
+
+    # host without explicit port (default port for scheme)
     try:
-        ok = await try_one(base)
-        if ok:
-            return True
+        host_only = f"{parsed.scheme}://{parsed.hostname}"
+        candidates.append(host_only)
     except Exception:
         pass
 
-    # If base uses http, try https; if https, try http
-    parsed = urllib.parse.urlparse(base)
-    alt_scheme = 'https' if parsed.scheme == 'http' else 'http'
-    alt_base = f"{alt_scheme}://{parsed.hostname}:{parsed.port or ('443' if alt_scheme=='https' else '80')}"
+    # alternate scheme (with and without port)
     try:
-        ok = await try_one(alt_base)
-        if ok:
-            # cache the alt scheme for future use
-            if alt_base not in _CACHED_BASES:
-                _CACHED_BASES.append(alt_base)
-            return True
+        alt_scheme = 'https' if parsed.scheme == 'http' else 'http'
+        alt_with_port = f"{alt_scheme}://{parsed.hostname}:{parsed.port or ('443' if alt_scheme=='https' else '80')}"
+        alt_host_only = f"{alt_scheme}://{parsed.hostname}"
+        candidates.append(alt_with_port)
+        candidates.append(alt_host_only)
     except Exception:
         pass
+
+    # Deduplicate while preserving order
+    seen = set()
+    candidates_unique = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            candidates_unique.append(c)
+
+    for c in candidates_unique:
+        try:
+            ok = await try_one(c)
+            if ok:
+                # cache the working base for future lookups
+                if c not in _CACHED_BASES:
+                    _CACHED_BASES.append(c)
+                return True
+        except Exception:
+            continue
 
     return False
 
