@@ -359,7 +359,20 @@ async def cleanup(loop, session, webhook, display):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     try:
-        loop.create_task(main(loop))
+        # If Wiim-only mode is enabled, run the Wiim entrypoint instead of Sonos flow
+        if getattr(sonos_settings, 'wiim_only', False):
+            try:
+                import go_wiim
+
+                loop.create_task(go_wiim.main(loop))
+                _LOGGER.info('Starting in Wiim-only mode')
+            except Exception as err:
+                _LOGGER.exception('Failed to start Wiim-only mode: %s', err)
+                # Fall back to normal Sonos main if Wiim entrypoint fails
+                loop.create_task(main(loop))
+        else:
+            loop.create_task(main(loop))
+
         loop.run_forever()
     finally:
         loop.close()
