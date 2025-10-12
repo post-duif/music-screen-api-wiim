@@ -82,12 +82,23 @@ async def main(loop):
                 if not base or not session:
                     _LOGGER.debug('No base or session for next_track')
                     return
-                ok, status, text = await wiim_client.next_track(session, base)
-                _LOGGER.debug('next_track result ok=%s status=%s len_text=%d', ok, status, len(text) if text else 0)
+                # Provide immediate UI feedback so the touch feels snappy
+                try:
+                    display.show_album(show_details=True, detail_timeout=1)
+                except Exception:
+                    _LOGGER.debug('Failed to show immediate UI feedback')
+
+                t0 = time.perf_counter()
+                # Use a short timeout for the responsive touch path; retry with a longer timeout if needed
+                ok, status, text = await wiim_client.send_command(session, base, 'setPlayerCmd:next', timeout=2)
+                took = time.perf_counter() - t0
+                _LOGGER.debug('next_track result ok=%s status=%s took=%.3fs len_text=%d', ok, status, took, len(text) if text else 0)
                 if not ok:
-                    _LOGGER.info('Retrying next_track once')
-                    ok2, status2, text2 = await wiim_client.next_track(session, base)
-                    _LOGGER.debug('next_track retry ok=%s status=%s', ok2, status2)
+                    _LOGGER.info('next_track failed or timed out (%.3fs); retrying once with longer timeout', took)
+                    t1 = time.perf_counter()
+                    ok2, status2, text2 = await wiim_client.send_command(session, base, 'setPlayerCmd:next', timeout=5)
+                    took2 = time.perf_counter() - t1
+                    _LOGGER.debug('next_track retry ok=%s status=%s took=%.3fs', ok2, status2, took2)
 
             loop.create_task(_do_next())
         else:

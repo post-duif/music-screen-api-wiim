@@ -87,6 +87,10 @@ touch_controls = False
 # When touch is enabled, tapping the screen can show details for this many seconds
 touch_detail_timeout = 8
 
+# Time window (seconds) to consider multiple taps part of the same gesture.
+# Reduce this to require faster double/triple taps (e.g. 0.4). Increase to make taps more forgiving.
+touch_tap_window = 0.6
+
 # Touch tap action options (comma-separated): any of 'show_details', 'next', 'favorite'
 # Example: touch_actions = ['show_details', 'next']
 touch_actions = ['show_details']
