@@ -103,6 +103,11 @@ async def send_command(session, base, command, timeout=5):
         async with session.get(url, timeout=timeout, ssl=False) as resp:
             text = await resp.text()
             ok = resp.status == 200
+            # Log a truncated response body for debugging
+            if not ok:
+                _LOGGER.debug('Wiim send_command %s returned status=%s headers=%s body=%s', url, resp.status, dict(resp.headers), (text[:300] + '...') if text and len(text) > 300 else text)
+            else:
+                _LOGGER.debug('Wiim send_command %s ok status=%s body_len=%d', url, resp.status, len(text) if text else 0)
             return ok, resp.status, text
     except Exception as err:
         _LOGGER.debug('Wiim send_command failed %s [%s]', url, err)

@@ -53,8 +53,8 @@ async def main(loop):
     touch_enabled = getattr(sonos_settings, 'touch_controls', False)
     touch_detail_timeout = getattr(sonos_settings, 'touch_detail_timeout', None)
 
-    # Maintain latest track info for favorite action
-    latest_info = {}
+    # Maintain context for touch handler (mutable so closure sees updates)
+    ctx = {'base': None, 'session': None, 'latest_info': {}}
 
     # recent touch timestamps for multi-tap detection
     touch_times = deque()
@@ -73,13 +73,13 @@ async def main(loop):
             _LOGGER.info('Touch action: favorite')
             touch_times.clear()
             # schedule favorite handler
-            loop.create_task(_run_favorite(latest_info))
+            loop.create_task(_run_favorite(ctx['latest_info']))
         elif cnt >= 2:
             _LOGGER.info('Touch action: next track')
             touch_times.clear()
             # schedule an async task that will await and log the result
             async def _do_next():
-                if not base or not session:
+                if not ctx['base'] or not ctx['session']:
                     _LOGGER.debug('No base or session for next_track')
                     return
                 # Provide immediate UI feedback so the touch feels snappy
@@ -90,13 +90,13 @@ async def main(loop):
 
                 t0 = time.perf_counter()
                 # Use a short timeout for the responsive touch path; retry with a longer timeout if needed
-                ok, status, text = await wiim_client.send_command(session, base, 'setPlayerCmd:next', timeout=2)
+                ok, status, text = await wiim_client.send_command(ctx['session'], ctx['base'], 'setPlayerCmd:next', timeout=2)
                 took = time.perf_counter() - t0
                 _LOGGER.debug('next_track result ok=%s status=%s took=%.3fs len_text=%d', ok, status, took, len(text) if text else 0)
                 if not ok:
                     _LOGGER.info('next_track failed or timed out (%.3fs); retrying once with longer timeout', took)
                     t1 = time.perf_counter()
-                    ok2, status2, text2 = await wiim_client.send_command(session, base, 'setPlayerCmd:next', timeout=5)
+                    ok2, status2, text2 = await wiim_client.send_command(ctx['session'], ctx['base'], 'setPlayerCmd:next', timeout=5)
                     took2 = time.perf_counter() - t1
                     _LOGGER.debug('next_track retry ok=%s status=%s took=%.3fs', ok2, status2, took2)
 
@@ -180,9 +180,9 @@ async def main(loop):
             info = await wiim_client.get_now_playing(session, base)
             # publish latest info for touch favorite handling
             try:
-                latest_info.clear()
+                ctx['latest_info'].clear()
                 if isinstance(info, dict):
-                    latest_info.update(info)
+                    ctx['latest_info'].update(info)
             except Exception:
                 pass
             _LOGGER.debug('Wiim now playing: %s', info)
