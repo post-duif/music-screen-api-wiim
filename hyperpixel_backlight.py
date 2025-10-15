@@ -37,6 +37,14 @@ class Backlight():
             _LOGGER.error("Backlight control not available, please ensure '%s' is part of group 'gpio'.", username)
             _LOGGER.error("  To add user to group: `sudo gpasswd -a %s gpio`", username)
         else:
+            # If available, initialize PWM for brightness control
+            try:
+                self.pwm = GPIO.PWM(BACKLIGHT_PIN, 1000)
+                self.pwm.start(100 if initial_value else 0)
+                self._brightness = 100 if initial_value else 0
+            except Exception:
+                self.pwm = None
+                self._brightness = 100 if initial_value else 0
             self.set_power(initial_value)
 
     def set_power(self, new_state):
@@ -48,11 +56,33 @@ class Backlight():
             _LOGGER.debug("Going idle, turning backlight off")
         self.power = new_state
         try:
-            GPIO.output(BACKLIGHT_PIN, new_state)
+            if self.pwm is not None:
+                # PWM: new_state True -> restore brightness, False -> 0
+                if new_state:
+                    self.pwm.ChangeDutyCycle(self._brightness)
+                else:
+                    self.pwm.ChangeDutyCycle(0)
+            else:
+                GPIO.output(BACKLIGHT_PIN, new_state)
         except RuntimeError as err:
             _LOGGER.error("GPIO.output failed: %s", err)
             # Disable further attempts to touch GPIO to avoid repeated errors
             self.active = False
+
+    def set_brightness(self, value: int):
+        """Set brightness 0..100 when PWM available."""
+        if not self.active:
+            return
+        value = max(0, min(100, int(value)))
+        self._brightness = value
+        try:
+            if getattr(self, 'pwm', None) is not None:
+                self.pwm.ChangeDutyCycle(value)
+            else:
+                # Emulate brightness by toggling power: threshold 50
+                GPIO.output(BACKLIGHT_PIN, value >= 50)
+        except Exception as err:
+            _LOGGER.debug('set_brightness failed: %s', err)
 
     def cleanup(self):
         """Return the GPIO setup to initial state."""

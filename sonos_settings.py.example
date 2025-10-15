@@ -95,3 +95,14 @@ touch_actions = ['show_details']
 # 'tidal' would integrate with Tidal API (not implemented) and 'none' disables favorites.
 touch_favorite_backend = 'script'  # or 'tidal' or 'none'
 touch_favorite_script = '/path/to/favorite_script.sh'
+
+# MQTT integration (optional) — set mqtt_enabled = True to enable Home Assistant controls.
+# The code will subscribe to <mqtt_topic_prefix>/command and accept simple payloads
+# Examples of payloads: 'start', 'stop', 'pause', 'resume', 'quit', 'screen:on', 'screen:off', 'brightness:50'
+mqtt_enabled = False
+mqtt_broker = '192.168.1.2'
+mqtt_port = 1883
+mqtt_user = ''
+mqtt_password = ''
+mqtt_topic_prefix = 'home/music-screen'
+

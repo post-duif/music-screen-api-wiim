@@ -18,6 +18,7 @@ import sonos_settings
 import wiim_client
 import wiim_upnp
 from collections import deque
+import mqtt_control
 
 _LOGGER = logging.getLogger(__name__)
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -118,6 +119,20 @@ async def main(loop):
     # Create aiohttp session early so touch handlers can use it immediately
     session = ClientSession()
 
+    # MQTT integration
+    mqtt_obj = None
+    runner_control = {}
+    if getattr(sonos_settings, 'mqtt_enabled', False):
+        try:
+            mqtt_obj = mqtt_control.make_mqtt(getattr(sonos_settings, 'mqtt_broker', '127.0.0.1'),
+                                               getattr(sonos_settings, 'mqtt_port', 1883),
+                                               getattr(sonos_settings, 'mqtt_user', ''),
+                                               getattr(sonos_settings, 'mqtt_password', ''),
+                                               getattr(sonos_settings, 'mqtt_topic_prefix', 'home/music-screen'),
+                                               display=None, backlight=None, runner_control=None)
+        except Exception as err:
+            _LOGGER.debug('Failed to create MQTT client: %s', err)
+
     try:
         display = DisplayController(loop, sonos_settings.show_details, sonos_settings.show_artist_and_album,
                                     sonos_settings.show_details_timeout, sonos_settings.overlay_text, sonos_settings.show_play_state, False,
@@ -127,6 +142,23 @@ async def main(loop):
         return
 
     setup_logging_local()
+
+    # Now that display/backlight exist, update mqtt dispatch targets
+    if mqtt_obj:
+        try:
+            runner_control = {}
+            # define quit/start callbacks
+            def _quit():
+                _LOGGER.info('MQTT requested quit')
+                asyncio.ensure_future(cleanup(loop, session, display))
+            def _start():
+                _LOGGER.info('MQTT requested start - currently no-op')
+            runner_control['quit'] = _quit
+            runner_control['start'] = _start
+            mqtt_obj.on_command = lambda c: mqtt_control._default_dispatch(c, display=display, backlight=display.backlight, runner_control=runner_control)
+            mqtt_obj.start()
+        except Exception as err:
+            _LOGGER.debug('Failed to start MQTT client: %s', err)
 
     base_cfg = getattr(sonos_settings, 'wiim_base_url', '')
 
@@ -224,6 +256,14 @@ async def cleanup(loop, session, display):
     _LOGGER.debug('Cleaning up')
     display.cleanup()
     await session.close()
+    try:
+        if 'mqtt_obj' in globals() and globals().get('mqtt_obj'):
+            try:
+                globals().get('mqtt_obj').stop()
+            except Exception:
+                pass
+    except Exception:
+        pass
     loop.stop()
 
 
