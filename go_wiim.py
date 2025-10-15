@@ -118,6 +118,48 @@ async def main(loop):
     # Create aiohttp session early so touch handlers can use it immediately
     session = ClientSession()
 
+    # Apply initial brightness and schedule night-dimming task
+    def apply_brightness(value):
+        try:
+            if getattr(display, 'backlight', None) and hasattr(display.backlight, 'set_brightness'):
+                display.backlight.set_brightness(int(value))
+                _LOGGER.info('Applied brightness %s', value)
+            else:
+                _LOGGER.debug('Backlight brightness control not available')
+        except Exception as err:
+            _LOGGER.debug('Failed to set brightness: %s', err)
+
+    async def _brightness_loop():
+        # Check every 60 seconds and apply night/day brightness as configured
+        while True:
+            try:
+                nb = getattr(sonos_settings, 'night_brightness', None)
+                ns = getattr(sonos_settings, 'night_start', None)
+                ne = getattr(sonos_settings, 'night_end', None)
+                default_b = getattr(sonos_settings, 'default_brightness', None)
+                if ns and ne and nb is not None:
+                    # parse HH:MM
+                    now = time.localtime()
+                    hhmm = lambda s: tuple(map(int, s.split(':')))
+                    try:
+                        sh, sm = hhmm(ns)
+                        eh, em = hhmm(ne)
+                        start = sh*60 + sm
+                        end = eh*60 + em
+                        cur = now.tm_hour*60 + now.tm_min
+                        in_night = False
+                        if start <= end:
+                            in_night = (cur >= start and cur < end)
+                        else:
+                            # overnight range
+                            in_night = not (cur >= end and cur < start)
+                        apply_brightness(nb if in_night else (default_b if default_b is not None else 100))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            await asyncio.sleep(60)
+
     try:
         display = DisplayController(loop, sonos_settings.show_details, sonos_settings.show_artist_and_album,
                                     sonos_settings.show_details_timeout, sonos_settings.overlay_text, sonos_settings.show_play_state, False,
@@ -127,6 +169,17 @@ async def main(loop):
         return
 
     setup_logging_local()
+
+    # Apply configured brightness immediately and start background dimming task
+    try:
+        default_b = getattr(sonos_settings, 'default_brightness', None)
+        if default_b is not None:
+            # Use loop.call_soon_threadsafe to ensure it runs in event loop
+            loop.create_task(asyncio.to_thread(apply_brightness, default_b))
+        # start periodic brightness loop
+        loop.create_task(_brightness_loop())
+    except Exception:
+        _LOGGER.debug('Failed to start brightness loop')
 
     base_cfg = getattr(sonos_settings, 'wiim_base_url', '')
 
