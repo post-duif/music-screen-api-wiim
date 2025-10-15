@@ -157,6 +157,9 @@ async def main(loop):
         return
 
     previous_track = None
+    # Cache recent failed artwork lookups to avoid repeated probes (track_id -> timestamp)
+    _failed_art_cache = {}
+    art_failure_cooldown = getattr(sonos_settings, 'art_failure_cooldown', 30)  # seconds
 
     def stop_handler():
         asyncio.ensure_future(cleanup(loop, session, display))
@@ -213,10 +216,30 @@ async def main(loop):
                 # Next try wiim_upnp.probing (templates + SSDP fallback)
                 if pil_image is None:
                     try:
-                        _LOGGER.debug('Trying wiim_upnp.get_image_data for %s - %s', info.get('artist'), info.get('title'))
-                        data = await wiim_upnp.get_image_data(session, info.get('artist'), info.get('title'))
-                        if data:
-                            pil_image = Image.open(BytesIO(data))
+                        artist = (info.get('artist') or '').strip()
+                        title = (info.get('title') or '').strip()
+                        # Skip obvious placeholders or extremely short names
+                        skip_probe = False
+                        if not artist or not title:
+                            skip_probe = True
+                        low_artist = artist.lower()
+                        low_title = title.lower()
+                        if any(x in low_artist for x in ('unknow', 'unknown', 'n/a')) or any(x in low_title for x in ('unknow', 'unknown', 'n/a')):
+                            skip_probe = True
+
+                        track_key = f"{artist} - {title}"
+                        last_fail = _failed_art_cache.get(track_key)
+                        if last_fail and (time.time() - last_fail) < art_failure_cooldown:
+                            _LOGGER.debug('Skipping art probe for %s (recent failure)', track_key)
+                            skip_probe = True
+
+                        if not skip_probe:
+                            _LOGGER.debug('Trying wiim_upnp.get_image_data for %s - %s', artist, title)
+                            data = await wiim_upnp.get_image_data(session, artist, title)
+                            if data:
+                                pil_image = Image.open(BytesIO(data))
+                            else:
+                                _failed_art_cache[track_key] = time.time()
                     except Exception as err:
                         _LOGGER.debug('wiim_upnp.get_image_data failed: %s', err)
 
