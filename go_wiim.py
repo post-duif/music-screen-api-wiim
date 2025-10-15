@@ -178,15 +178,28 @@ async def main(loop):
             state = (info.get('state') or '').lower()
             track_id = f"{info.get('artist') or ''} - {info.get('title') or ''}"
 
+            # Normalize album_art_uri: treat obvious non-URLs as None
+            art_uri = info.get('album_art_uri')
+            if art_uri and not str(art_uri).startswith(('http://', 'https://')):
+                art_uri = None
+                info['album_art_uri'] = None
+
             # If the device reports stopped state, hide the display/backlight
             try:
-                if state == 'stop' or state == 'stopped' or state == 'idle':
+                if state in ('stop', 'stopped', 'idle'):
                     _LOGGER.info('Wiim reported stop/idle state — hiding display')
                     display.hide_album()
                     await asyncio.sleep(1)
                     continue
-                # If it reports play and we were hidden, allow show/display update below
-            except Exception as _:
+            except Exception:
+                pass
+
+            # If the device moved to play and the display is currently hidden, force an update
+            try:
+                if state.startswith('play') and not getattr(display, 'is_showing', False):
+                    _LOGGER.info('Wiim moved to play and display is hidden — forcing update')
+                    previous_track = None
+            except Exception:
                 pass
             if track_id != previous_track:
                 previous_track = track_id
