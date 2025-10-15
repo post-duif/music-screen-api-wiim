@@ -161,6 +161,10 @@ async def main(loop):
     _failed_art_cache = {}
     art_failure_cooldown = getattr(sonos_settings, 'art_failure_cooldown', 30)  # seconds
 
+    # Track consecutive empty metadata responses for current base and rotate if stuck
+    base_empty_count = 0
+    base_empty_threshold = getattr(sonos_settings, 'base_empty_threshold', 5)
+
     def stop_handler():
         asyncio.ensure_future(cleanup(loop, session, display))
 
@@ -170,6 +174,37 @@ async def main(loop):
     try:
         while True:
             info = await wiim_client.get_now_playing(session, base)
+            # If the device returned all-None metadata, count it as an empty response for this base
+            if isinstance(info, dict) and not any(info.values()):
+                base_empty_count += 1
+                _LOGGER.debug('Empty metadata from %s (count=%d)', base, base_empty_count)
+                if base_empty_count >= base_empty_threshold:
+                    _LOGGER.info('Base %s returned empty metadata %d times — rotating candidates', base, base_empty_count)
+                    # Try cached bases from wiim_upnp.warmup
+                    try:
+                        candidates = await wiim_upnp.warmup(session, timeout=2)
+                        for c in candidates:
+                            if c != base:
+                                _LOGGER.info('Switching to candidate base %s', c)
+                                base = c
+                                base_empty_count = 0
+                                break
+                        else:
+                            # Try SSDP discovery for new locations
+                            locs = await wiim_upnp.discover_locations(loop=loop, timeout=2)
+                            if locs:
+                                parsed = urllib.parse.urlparse(locs[0])
+                                new_base = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ('443' if parsed.scheme=='https' else '80')}"
+                                _LOGGER.info('Switching to discovered base %s', new_base)
+                                base = new_base
+                                base_empty_count = 0
+                    except Exception as err:
+                        _LOGGER.debug('Error rotating bases: %s', err)
+                    # continue to next loop iteration after changing base
+                    await asyncio.sleep(0.5)
+                    continue
+            else:
+                base_empty_count = 0
             # publish latest info for touch favorite handling
             try:
                 latest_info.clear()
