@@ -175,7 +175,19 @@ async def main(loop):
             except Exception:
                 pass
             _LOGGER.debug('Wiim now playing: %s', info)
+            state = (info.get('state') or '').lower()
             track_id = f"{info.get('artist') or ''} - {info.get('title') or ''}"
+
+            # If the device reports stopped state, hide the display/backlight
+            try:
+                if state == 'stop' or state == 'stopped' or state == 'idle':
+                    _LOGGER.info('Wiim reported stop/idle state — hiding display')
+                    display.hide_album()
+                    await asyncio.sleep(1)
+                    continue
+                # If it reports play and we were hidden, allow show/display update below
+            except Exception as _:
+                pass
             if track_id != previous_track:
                 previous_track = track_id
                 pil_image = None
